@@ -1,12 +1,12 @@
 
 #include <PubSubClient.h>
 
-extern PubSubClient client;
+extern PubSubClient mqtt_client;
 
 void loadcerts();
 
-void callback(char* topic, byte* payload, unsigned int length);
+void mqtt_callback(char* topic, byte* payload, unsigned int length);
 
-void reconnect();
+void mqtt_reconnect();
 
 void verifytls();

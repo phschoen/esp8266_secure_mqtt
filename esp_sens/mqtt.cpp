@@ -2,17 +2,18 @@
 #include "wifi.h"
 #include "mqtt.h"
 #include "config.h"
+#include "debug.h"
 
-PubSubClient client(espClient);
+PubSubClient mqtt_client(MQTT_SERVER, MQTT_PORT, espClient);
 
-void callback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
+void mqtt_callback(char* topic, byte* payload, unsigned int length) {
+  debug_info("Message arrived [");
+  debug_info(topic);
+  debug_info("] \n");
   for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
+    debug_info("%*s\n",length,(char*)payload);
   }
-  Serial.println();
+  debug_info("\n");
 
   // Switch on the LED if an 1 was received as first character
   if ((char)payload[0] == '1') {
@@ -26,34 +27,44 @@ void callback(char* topic, byte* payload, unsigned int length) {
 }
 
 
-void reconnect() {
-  int tries=3;
+void mqtt_reconnect() {
+  int tries=5;
   // Loop until we're reconnected
-  while (!client.connected() && tries > 0) {
+  while (!mqtt_client.connected() && tries > 0) {
     tries--;
-    Serial.print("Attempting MQTT connection...");
+    debug_info("Attempting MQTT connection...\n");
     
     // Create a random client ID
-    String clientId = MQTT_USER;
+    String clientId = "esp";
     clientId += "-";
     clientId += String(random(0xffff), HEX);
     
     // Attempt to connect
-    if (client.connect(clientId.c_str(), MQTT_USER, MQTT_PW)) {
-      Serial.println("connected");
-      
-      if (espClient.verify(MQTT_SERVER_FINGERPRINT, MQTT_SERVER)) {
-        Serial.println("certificate matches");
-      } else {
-        Serial.println("certificate doesn't match");
-      }
+    #ifdef MQTT_USER
+    //int rt = mqtt_client.connect(clientId.c_str(), MQTT_USER, MQTT_PW);
+    #else
+    int rt = mqtt_client.connect(clientId.c_str());
+    #endif
+    if (rt) {
+      debug_info("connected\n");
+
+      #ifdef MQTT_SERVER_FINGERPRINT
+        if (espClient.verify(MQTT_SERVER_FINGERPRINT, MQTT_SERVER)) {
+          debug_info("certificate matches\n");
+        } else {
+          debug_info("certificate doesn't match\n");
+        }
+      #endif
     } else {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
+      debug_info("failed, rc=%d\n", mqtt_client.state());
+      debug_info(" try again in 5 seconds\n");
       // Wait 5 seconds before retrying
       delay(5000);
     }
+  }
+  if (tries <=0) {
+    debug_info("failed to connect: rest ESP\n", mqtt_client.state());
+    ESP.reset();
   }
 }
 
@@ -61,6 +72,7 @@ void reconnect() {
 // Load Certificates
 void loadcerts() {
 
+ #ifdef MQTT_SERVER_FINGERPRINT
   if (!SPIFFS.begin()) {
    Serial.println("Failed to mount file system");
    return;
@@ -113,6 +125,7 @@ else
    Serial.println("ca loaded");
    else
    Serial.println("ca failed");
+   #endif
 
 }
 

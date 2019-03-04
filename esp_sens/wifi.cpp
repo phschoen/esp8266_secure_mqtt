@@ -1,7 +1,10 @@
 #include "wifi.h"
 #include "config.h"
 
-WiFiClientSecure espClient;
+
+WiFiClientSecure espClientSec;
+
+WiFiClient espClient;
 
 
 void setup_wifi() {

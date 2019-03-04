@@ -1,10 +1,12 @@
 #include <Wire.h>
 #include "SdsDustSensor.h"
+#include "luftdaten-api.h"
 
 #include "SHTSensor.h"
 #include "mqtt.h"
 #include "wifi.h"
 #include "config.h"
+#include "debug.h"
 
 
 int rxPin = D1;
@@ -18,17 +20,22 @@ SHTSensor sht;
 // SHTSensor sht(SHTSensor::SHT3X);
 #define MINUTES_SLEEP 1
 
+uint64_t esp_chipid;
 
 void setup() {
+
   Wire.begin(SDA_PIN, SCL_PIN);        // join i2c bus (address optional for master)
-  Serial.begin(9600);
+  Serial.begin(115200);
   delay(1000); // let serial console settle
 
+
   // sds init
-  sds.begin();
-  Serial.println(sds.queryFirmwareVersion().toString()); // prints firmware version
-  Serial.println(sds.setActiveReportingMode().toString()); // ensures sensor is in 'active' reporting mode
+  esp_chipid = ESP.getChipId();
+  debug_info("id is %llu\n", esp_chipid);
+  debug_info("Firmware of sds %s\n", sds.queryFirmwareVersion().toString().c_str()); // prints firmware version
+  debug_info("mode %s\n", sds.setActiveReportingMode().toString().c_str()); // ensures sensor is in 'active' reporting mode
   
+  sds.begin();
   Serial.println(sds.setCustomWorkingPeriod(MINUTES_SLEEP).toString()); // sensor sends data every 1 minutes
   //Serial.println(sds.setContinuousWorkingPeriod().toString()); // ensures sensor has continuous working period - default but not recommended
 
@@ -41,28 +48,37 @@ void setup() {
   sht.setAccuracy(SHTSensor::SHT_ACCURACY_HIGH); // only supported by SHT3x
   setup_wifi();
 
-  client.setServer(MQTT_SERVER, 1883);
-  client.setCallback(callback);
+  //mqtt_client.setServer(MQTT_SERVER, MQTT_PORT);
+  mqtt_client.setCallback(mqtt_callback);
   pinMode(BUILTIN_LED, OUTPUT);     // Initialize the BUILTIN_LED pin as an output
 
+  debug_info("setup done\n");
 }
 
 long lastMsg = 0;
 void loop() {
+  debug_info("enter loop\n");
+
+  mqtt_client.loop();
+  long now = millis();
+  
   PmResult pm = sds.readPm();
   if (pm.isOk()) {
-    Serial.print("PM2.5 = ");
-    Serial.print(pm.pm25);
-    Serial.print(", PM10 = ");
-    Serial.println(pm.pm10);
+    debug_info("PM2.5 = %f", pm.pm25);
+    debug_info(", PM10 = %f\n", pm.pm10);
 
     // if you want to just print the measured values, you can use toString() method as well
-    Serial.println(pm.toString());
+    debug_info(pm.toString().c_str());
   } else {
+    if (now -lastMsg > MINUTES_SLEEP * 60 * 1000 *2 ) {
+      Serial.print("error no data from dust sensor for a long time\n");
+      ESP.reset();
+      return;
+    }
     // notice that loop delay is set to 0.5s and some reads are not available
     //Serial.print("Could not read values from sensor, reason: ");
     //Serial.println(pm.statusToString());
-    delay(MINUTES_SLEEP * 60 * 1000 * 0.5);
+    //delay(MINUTES_SLEEP * 60 * 1000 * 0.5);
     return;
   }
   if (sht.readSample()) {
@@ -76,31 +92,29 @@ void loop() {
   } else {
       Serial.print("Error in readSample()\n");
   }
-  if (!client.connected()) {
-    reconnect();
+  if (!mqtt_client.connected()) {
+    mqtt_reconnect();
   }
-  client.loop();
-  long now = millis();
   
   if (now - lastMsg > 2000) {
     lastMsg = now;
     char msg[50];
     
-    snprintf (msg, sizeof(msg), "%ld", sht.getHumidity());
+    snprintf (msg, sizeof(msg), "%f", sht.getHumidity());
     Serial.print("Publish message: "); Serial.println(msg);
-    client.publish("outdoor/balcony/humidity", msg);
+    mqtt_client.publish("/balcony/humidity", msg);
     
-    snprintf (msg, sizeof(msg), "%ld", sht.getTemperature());
+    snprintf (msg, sizeof(msg), "%f", sht.getTemperature());
     Serial.print("Publish message: "); Serial.println(msg);
-    client.publish("outdoor/balcony/temperature", msg);
+    mqtt_client.publish("/balcony/temperature", msg);
     
-    snprintf (msg, sizeof(msg), "%ld", pm.pm10);
+    snprintf (msg, sizeof(msg), "%f", pm.pm10);
     Serial.print("Publish message: "); Serial.println(msg);
-    client.publish("outdoor/balcony/dust_pm10", msg);
+    mqtt_client.publish("/balcony/dust_pm10", msg);
     
-    snprintf (msg, sizeof(msg), "%ld", pm.pm25);
+    snprintf (msg, sizeof(msg), "%f", pm.pm25);
     Serial.print("Publish message: ");Serial.println(msg);
-    client.publish("outdoor/balcony/dust_pm25", msg);
+    mqtt_client.publish("/balcony/dust_pm25", msg);
   }
 
 }

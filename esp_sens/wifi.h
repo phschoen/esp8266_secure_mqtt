@@ -4,5 +4,6 @@
 
 
 
-extern WiFiClientSecure espClient;
+extern WiFiClientSecure espClientSec;
+extern WiFiClient espClient;
 void setup_wifi() ;
